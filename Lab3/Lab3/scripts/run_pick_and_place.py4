@@ -1,0 +1,129 @@
+import os
+import sys
+import time
+import numpy as np
+import mujoco
+import mujoco.viewer
+
+# Path setup
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+
+def solve_dls_ik(model, data, target_pos, target_quat, site_id, damping=0.05, max_step=0.05):
+    tcp_pos = data.site_xpos[site_id]
+    tcp_mat = data.site_xmat[site_id].reshape(3, 3)
+
+    pos_err = target_pos - tcp_pos
+
+    tgt_w, tgt_x, tgt_y, tgt_z = target_quat
+    tgt_mat = np.array([
+        [1 - 2*(tgt_y**2 + tgt_z**2), 2*(tgt_x*tgt_y - tgt_z*tgt_w), 2*(tgt_x*tgt_z + tgt_y*tgt_w)],
+        [2*(tgt_x*tgt_y + tgt_z*tgt_w), 1 - 2*(tgt_x**2 + tgt_z**2), 2*(tgt_y*tgt_z - tgt_x*tgt_w)],
+        [2*(tgt_x*tgt_z - tgt_y*tgt_w), 2*(tgt_y*tgt_z + tgt_x*tgt_w), 1 - 2*(tgt_x**2 + tgt_y**2)]
+    ])
+    
+    rot_err_mat = tgt_mat @ tcp_mat.T
+    rot_err = 0.5 * np.array([
+        rot_err_mat[2, 1] - rot_err_mat[1, 2],
+        rot_err_mat[0, 2] - rot_err_mat[2, 0],
+        rot_err_mat[1, 0] - rot_err_mat[0, 1]
+    ])
+
+    error_6d = np.hstack([pos_err, rot_err])
+
+    jacp = np.zeros((3, model.nv))
+    jacr = np.zeros((3, model.nv))
+    mujoco.mj_jacSite(model, data, jacp, jacr, site_id)
+    J = np.vstack([jacp[:, :6], jacr[:, :6]])
+
+    n = J.shape[0]
+    J_dls = J.T @ np.linalg.pinv(J @ J.T + (damping ** 2) * np.eye(n))
+    dq = J_dls @ error_6d
+    return np.clip(dq, -max_step, max_step)
+
+
+def load_robot_model():
+    # 1. Candidate paths to robot XML
+    candidates = [
+        "robot_descriptions/single_arm_heal_effort_actuation_rs_mj_2.xml",
+        "robot_descriptions/arm_gripper.xml",
+        "robot_descriptions/world.xml"
+    ]
+    
+    xml_path = next((p for p in candidates if os.path.exists(p)), None)
+    if not xml_path:
+        raise FileNotFoundError("Could not locate robot XML inside robot_descriptions/")
+
+    print(f"[INFO] Loading model directly from path: {xml_path}")
+    model = mujoco.MjModel.from_xml_path(xml_path)
+
+    # 2. Fix Material Alpha Channel (Make arm mesh visible)
+    mat_id = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_MATERIAL, "arm")
+    if mat_id >= 0:
+        model.mat_rgba[mat_id, 3] = 1.0
+
+    return model
+
+
+def main():
+    model = load_robot_model()
+    data = mujoco.MjData(model)
+
+    # Locate site or body ID for End Effector
+    try:
+        site_id = model.site("right_center").id
+    except Exception:
+        site_names = [model.site(i).name for i in range(model.nsite)]
+        site_id = model.site("tcp").id if "tcp" in site_names else 0
+
+    # Apply home pose
+    if model.nq >= 6:
+        data.qpos[:6] = np.array([0.0, -0.5, 1.0, 0.0, 0.5, 0.0])
+    mujoco.mj_forward(model, data)
+
+    cube_pos      = np.array([0.45, 0.15, 0.425])
+    pregrasp_pos  = np.array([cube_pos[0], cube_pos[1], 0.55])
+    grasp_pos     = np.array([cube_pos[0], cube_pos[1], 0.43])
+    lift_pos      = np.array([cube_pos[0], cube_pos[1], 0.60])
+    tray_drop_pos = np.array([0.45, -0.18, 0.50])
+
+    target_quat = np.array([0.0, 0.0, 1.0, 0.0])
+    phase = "pregrasp"
+
+    print("\n--- Launching Passive Viewer with Active Robot ---")
+    with mujoco.viewer.launch_passive(model, data) as viewer:
+        time.sleep(0.5)
+        while viewer.is_running():
+            if phase == "pregrasp":
+                target_pos = pregrasp_pos
+            elif phase == "grasp":
+                target_pos = grasp_pos
+            elif phase == "lift":
+                target_pos = lift_pos
+            elif phase == "tray_drop":
+                target_pos = tray_drop_pos
+            else:
+                target_pos = tray_drop_pos
+
+            dq = solve_dls_ik(model, data, target_pos, target_quat, site_id)
+            if model.nq >= 6:
+                data.qpos[:6] += dq
+                data.qfrc_applied[:6] = data.qfrc_bias[:6]
+
+            tcp_pos = data.site_xpos[site_id] if model.nsite > 0 else np.zeros(3)
+            pos_err = np.linalg.norm(target_pos - tcp_pos)
+
+            if phase == "pregrasp" and pos_err < 0.03:
+                phase = "grasp"
+            elif phase == "grasp" and pos_err < 0.02:
+                phase = "lift"
+            elif phase == "lift" and pos_err < 0.03:
+                phase = "tray_drop"
+
+            mujoco.mj_step(model, data)
+            viewer.sync()
+            time.sleep(model.opt.timestep)
+
+
+if __name__ == "__main__":
+    main()
+

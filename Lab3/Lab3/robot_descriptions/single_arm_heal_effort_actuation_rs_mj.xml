@@ -1,0 +1,65 @@
+<mujoco model="heal_arm">
+  <compiler angle="radian" meshdir="heal_meshes"/>
+  <option gravity="0 0 -9.81"/>
+
+  <default>
+    <joint damping="55" frictionloss="0.1" range="-3.14159 3.14159"/>
+    <motor ctrlrange="-150 150"/>
+  </default>
+
+  <asset>
+    <mesh name="base_link" file="base_link.STL"/>
+    <mesh name="link_1" file="link_1.STL"/>
+    <mesh name="link1" file="link_1.STL"/>
+    <mesh name="link_2" file="link_2.STL"/>
+    <mesh name="link2" file="link_2.STL"/>
+    <mesh name="link_3" file="link_3.STL"/>
+    <mesh name="link3" file="link_3.STL"/>
+    <mesh name="link_4" file="link_4.STL"/>
+    <mesh name="link4" file="link_4.STL"/>
+    <mesh name="link_5" file="link_5.STL"/>
+    <mesh name="link5" file="link_5.STL"/>
+    <mesh name="end_effector" file="end_effector.STL"/>
+    <mesh name="link6" file="end_effector.STL"/>
+  </asset>
+
+  <worldbody>
+    <body name="base_link" pos="0 0 0">
+      <geom type="mesh" mesh="base_link"/>
+      <body name="link_1" pos="0 0 0.12">
+        <joint name="joint_1" axis="0 0 1"/>
+        <geom type="mesh" mesh="link_1"/>
+        <body name="link_2" pos="0 0 0.15">
+          <joint name="joint_2" axis="0 1 0"/>
+          <geom type="mesh" mesh="link_2"/>
+          <body name="link_3" pos="0 0 0.35">
+            <joint name="joint_3" axis="0 1 0"/>
+            <geom type="mesh" mesh="link_3"/>
+            <body name="link_4" pos="0 0 0.35">
+              <joint name="joint_4" axis="0 0 1"/>
+              <geom type="mesh" mesh="link_4"/>
+              <body name="link_5" pos="0 0 0.12">
+                <joint name="joint_5" axis="0 1 0"/>
+                <geom type="mesh" mesh="link_5"/>
+                <body name="link_6" pos="0 0 0.1">
+                  <joint name="joint_6" axis="0 1 0"/>
+                  <geom type="mesh" mesh="end_effector"/>
+                  <site name="right_center" pos="0 0 0.05" quat="1 0 0 0"/>
+                </body>
+              </body>
+            </body>
+          </body>
+        </body>
+      </body>
+    </body>
+  </worldbody>
+
+  <actuator>
+    <motor name="turret" joint="joint_1"/>
+    <motor name="shoulder" joint="joint_2"/>
+    <motor name="elbow" joint="joint_3"/>
+    <motor name="wrist_1" joint="joint_4"/>
+    <motor name="wrist_2" joint="joint_5"/>
+    <motor name="wrist_3" joint="joint_6"/>
+  </actuator>
+</mujoco>
